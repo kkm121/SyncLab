@@ -14,6 +14,8 @@ import {
   PlusIcon,
   SearchIcon,
   RotateCwIcon,
+  RefreshCwIcon,
+  LaptopIcon,
   CheckCircleIcon,
   TagIcon,
   ClockIcon,

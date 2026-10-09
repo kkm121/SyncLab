@@ -81,6 +81,24 @@ def execute_op(db, op: SyncOp) -> SyncResult:
 
     def finish(result: SyncResult) -> SyncResult:
         _store_op(db, op.op_id, result)
+        try:
+            from .engine.realtime_hub import hub
+            hub.broadcast(
+                f"SYNC_{result.outcome.value.upper()}",
+                {
+                    "device_id": op.device_id,
+                    "document_id": op.document_id or (result.document.id if result.document else None),
+                    "base_version": op.base_version,
+                    "current_version": result.current_version,
+                    "outcome": result.outcome.value,
+                    "strategy": op.strategy.value if op.strategy else None,
+                    "merged_fields": result.merged_fields,
+                    "conflicts": [c.model_dump() for c in result.conflicts] if result.conflicts else [],
+                    "resolution": result.resolution,
+                },
+            )
+        except Exception:
+            pass
         return result
 
     # ---- create path ----

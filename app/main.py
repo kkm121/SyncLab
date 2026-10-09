@@ -1,15 +1,21 @@
 """SyncLab — offline-first sync with honest conflicts. No silent overwrites."""
 import logging
+import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from .db import init_db
-from .routers import devices, documents, sync
+from .routers import devices, documents, realtime, sync
 from .schemas import ErrorBody
 
 log = logging.getLogger("synclab")
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+STATIC_DIR = os.path.join(BASE_DIR, "static")
 
 
 @asynccontextmanager
@@ -20,7 +26,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="SyncLab",
-    description="Offline-first document sync: versioned writes, 3-way merge, explicit outcomes.",
+    description="Offline-first document sync: versioned writes, 3-way merge, explicit outcomes, and real-time WebSocket fleet feeds.",
     version="1.0.0",
     lifespan=lifespan,
 )
@@ -49,14 +55,6 @@ async def validation_handler(_: Request, exc: RequestValidationError):
     )
 
 
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
-import os
-
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-STATIC_DIR = os.path.join(BASE_DIR, "static")
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -67,7 +65,28 @@ app.add_middleware(
 
 app.include_router(documents.router)
 app.include_router(sync.router)
+app.include_router(realtime.router)
 app.include_router(devices.router)
+
+# Mount static web UI assets if built
+assets_dir = os.path.join(STATIC_DIR, "assets")
+if os.path.isdir(assets_dir):
+    app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
+
+@app.get("/", include_in_schema=False)
+async def serve_index():
+    index_file = os.path.join(STATIC_DIR, "index.html")
+    if os.path.exists(index_file):
+        return FileResponse(index_file)
+    return JSONResponse(
+        {
+            "service": "SyncLab Offline Sync Engine",
+            "docs": "/docs",
+            "health": "/health",
+            "websocket": "/ws/sync",
+        }
+    )
 
 
 @app.get("/health", tags=["meta"])
