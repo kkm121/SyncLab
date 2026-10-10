@@ -60,8 +60,12 @@ class SyncLabDeviceClient:
         self.cache_file = os.path.join(self.storage_dir, "cache.json")
         self.outbox_file = os.path.join(self.storage_dir, "outbox.json")
         self.vclock_file = os.path.join(self.storage_dir, "vector_clock.json")
+        self.state_file = os.path.join(self.storage_dir, "state.json")
 
-        self.is_online = True
+        state = self._load_json(self.state_file, {"is_online": True})
+        self.is_online = state.get("is_online", True)
+
+        self.interactive = True
         self.ws_thread: Optional[threading.Thread] = None
         self.stop_ws = threading.Event()
         self.client_http = httpx.Client(base_url=self.server_url, timeout=10.0)
@@ -91,6 +95,8 @@ class SyncLabDeviceClient:
             json.dump(self.outbox, f, indent=2)
         with open(self.vclock_file, "w", encoding="utf-8") as f:
             json.dump(self.vector_clock, f, indent=2)
+        with open(self.state_file, "w", encoding="utf-8") as f:
+            json.dump({"is_online": self.is_online}, f)
 
     def _register_device(self):
         if not self.is_online:
@@ -163,11 +169,13 @@ class SyncLabDeviceClient:
     def set_offline(self):
         self.is_online = False
         self.stop_ws.set()
+        self._save_state()
         print(f"{YELLOW}⚡ Device [{self.device_id}] is now OFFLINE (Airplane Mode / Disconnected).{RESET}")
         print(f"  All edits will be queued in local outbox: {self.outbox_file}")
 
     def set_online(self):
         self.is_online = True
+        self._save_state()
         self._register_device()
         self._start_ws_listener()
         print(f"{GREEN}🟢 Device [{self.device_id}] is now ONLINE.{RESET}")
@@ -386,7 +394,17 @@ class SyncLabDeviceClient:
                     print(f"  [4] {BLUE}FugueMax CRDT (Maximal Non-Interleaving Character Merge){RESET}")
                     print(f"  [5] Cancel / Keep in local outbox for later")
 
-                    choice = input(f"{BOLD}Select strategy (1-5): {RESET}").strip()
+                    if not self.interactive:
+                        print(f"\n{YELLOW}  -> Non-interactive CLI mode: Conflict retained in outbox.{RESET}")
+                        print(f"  -> To resolve, re-run with desired strategy, e.g.:")
+                        print(f"     python scripts/client.py --device {self.device_id} --command \"sync {doc_id} client_wins\"")
+                        print(f"     python scripts/client.py --device {self.device_id} --command \"sync {doc_id} server_wins\"\n")
+                        return False
+
+                    try:
+                        choice = input(f"{BOLD}Select strategy (1-5): {RESET}").strip()
+                    except (EOFError, KeyboardInterrupt):
+                        choice = "5"
                     if choice == "1":
                         # Fetch server version and run AST or line merge with conflict markers
                         server_doc = self.client_http.get(f"/documents/{doc_id}").json()
@@ -578,6 +596,7 @@ def main():
     client = SyncLabDeviceClient(device_id=args.device, server_url=args.server)
 
     if args.command:
+        client.interactive = False
         client.execute_command_string(args.command)
         client.stop_ws.set()
         return
