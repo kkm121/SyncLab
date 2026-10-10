@@ -36,6 +36,12 @@ def register_device(body: DeviceRegisterIn, db: Session = Depends(get_db)):
     return DeviceRegisterOut(device_id=dev.device_id, registered_at=dev.registered_at)
 
 
+@router.get("", response_model=list[DeviceRegisterOut])
+def list_devices(db: Session = Depends(get_db)):
+    devs = db.query(Device).order_by(Device.registered_at.desc()).all()
+    return [DeviceRegisterOut(device_id=d.device_id, registered_at=d.registered_at) for d in devs]
+
+
 @router.get("/{device_id}/changes", response_model=list[DeviceChange])
 def get_device_changes(device_id: str, since_version: int = 0, db: Session = Depends(get_db)):
     versions = (

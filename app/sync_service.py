@@ -234,7 +234,7 @@ def execute_op(db, op: SyncOp) -> SyncResult:
                 resolution="Manual strategy: resubmit with fresh base_version after resolving.",
             )
         )
-    if result.conflicts and strategy == Strategy.merge:
+    if result.conflicts and strategy in (Strategy.merge, Strategy.diff3):
         return finish(
             SyncResult(
                 outcome=Outcome.conflict,

@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 class Strategy(str, Enum):
     merge = "merge"
+    diff3 = "diff3"
     server_wins = "server_wins"
     client_wins = "client_wins"
     manual = "manual"

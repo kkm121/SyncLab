@@ -5,58 +5,119 @@
   <img src="https://img.shields.io/badge/Python-3.11+-3776AB.svg?logo=python&logoColor=white" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/WebSockets-Live%20Fleet-E0234E.svg" alt="WebSockets">
   <img src="https://img.shields.io/badge/SQLite-file--backed-003B57.svg" alt="SQLite">
-  <img src="https://img.shields.io/badge/Tests-39%20passed-16A34A.svg" alt="Tests 39 passed">
+  <img src="https://img.shields.io/badge/Tests-42%20passed-16A34A.svg" alt="Tests 42 passed">
   <img src="https://img.shields.io/badge/License-MIT-1D4ED8.svg" alt="License MIT">
 </p>
 
-**SyncLab** is an enterprise-grade backend synchronization engine designed to resolve multi-device offline state conflicts without silent data overwrites. Built for **GDG on Campus SRM Technical Domain Recruitment (Backend & Distributed Systems Track)**, SyncLab integrates classic 3-way Diff3 merges, monotonic version tracking, and atomic Compare-And-Swap (CAS) transactions with cutting-edge innovations: **Real-Time WebSocket & SSE Broadcast Channels**, **ML Semantic Conflict Detection**, **FugueMax Sequence CRDTs**, **Prolly Tree Merkle Reconciliation**, and **Distributed Vector Clocks**.
+**SyncLab** is an enterprise-grade backend synchronization engine designed to resolve multi-device offline state conflicts without silent data overwrites. Built for **GDG on Campus SRM Technical Domain Recruitment (Backend & Distributed Systems Track)**, SyncLab integrates classic 3-way Diff3 merges, monotonic version tracking, and atomic Compare-And-Swap (CAS) transactions with cutting-edge innovations: **Actual Multi-Device Client CLIs**, **Real-Time WebSocket & SSE Broadcast Channels**, **ML Semantic Conflict Detection**, **FugueMax Sequence CRDTs**, **Prolly Tree Merkle Reconciliation**, and **Distributed Vector Clocks**.
 
 ---
 
-## ⚡ Real-Time Demonstration Guide (Evaluator Quickstart)
+## ⚡ Real-Time Multi-Device Demonstration (Evaluator Guide)
 
-SyncLab provides multiple zero-friction provisions to inspect and verify synchronization in **real-time**:
+SyncLab is **NOT just a canned simulation** — it contains **real, fully functional multi-device client software and live web interfaces** that you can run side-by-side on your machine across terminal windows and browser tabs.
 
-### Option 1: Animated Real-Time Terminal Simulator (Recommended)
-Run the dedicated multi-device real-time simulator. It simulates a Laptop (MacBook Pro), Phone (iPhone 15), and Tablet going offline, editing concurrent buffers, experiencing network disconnects, and observing real-time Diff3 merges and conflict prevention:
+---
+
+### Method 1: Actual Working Multi-Device Client CLI (Recommended for Testing)
+
+Run the real SyncLab client CLI in **two separate terminal windows** to test actual offline synchronization with real user input:
+
+#### Step 1: Start the Backend Server
+```bash
+uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+```
+
+#### Step 2: Open Device 1 (Laptop) in Terminal A
+```bash
+python scripts/client.py --device laptop
+```
+
+#### Step 3: Open Device 2 (Phone) in Terminal B
+```bash
+python scripts/client.py --device phone
+```
+
+#### Step 4: Try Real Multi-Device Commands in Real-Time!
+In **Terminal A (Laptop)**:
+```text
+laptop [ONLINE] > create "Project Spec" "Line 1: Architecture\nLine 2: Storage Engine"
+```
+*(Notice: Both terminals now have document #1 registered!)*
+
+In **Terminal A (Laptop)** — Go Offline & Make Changes:
+```text
+laptop [ONLINE] > offline
+laptop [OFFLINE] > edit 1 "Line 1: Architecture [UPDATED BY LAPTOP OFFLINE]\nLine 2: Storage Engine"
+```
+*(Notice: Laptop saved the change in its local offline outbox with Base Version v1)*
+
+In **Terminal B (Phone)** — Make Online Changes Concurrently:
+```text
+phone [ONLINE] > append 1 "Line 3: Disjoint Section added by Phone"
+```
+*(Notice: Server commits Phone's change to v2)*
+
+In **Terminal A (Laptop)** — Reconnect & Synchronize:
+```text
+laptop [OFFLINE] > online
+laptop [ONLINE] > sync 1
+```
+> **Result:** The server computes an actual **3-Way Diff3 line-level merge** between Common Ancestor (Base v1), Phone's v2, and Laptop's offline mutation. Both disjoint edits are merged cleanly into **v3** without human intervention! Terminal B immediately receives a live push notification over WebSockets:  
+> `⚡ [REAL-TIME LIVE UPDATE] Doc #1 updated by 'laptop' -> v3`
+
+#### Step 5: High-Stakes Same-Line Conflict Test
+1. In Terminal A: `offline` -> `edit 1 "Architecture: Microservices"`
+2. In Terminal B: `edit 1 "Architecture: Monolith"` (Phone pushes first -> v4)
+3. In Terminal A: `online` -> `sync 1`
+4. **Zero Silent Overwrite Guarantee:** The server rejects Laptop's stale write and displays an interactive resolution menu:
+   ```text
+   ⚠ [CONFLICT DETECTED — ZERO OVERWRITE GUARANTEE]
+   CHOOSE CONFLICT RESOLUTION STRATEGY:
+     [1] Diff3 3-Way Line Merge (Generate Conflict Markers: <<<<<<< / ======= / >>>>>>>)
+     [2] Server Wins (Accept server v4, drop local)
+     [3] Client Wins (Force local edit over server)
+     [4] FugueMax CRDT (Maximal Non-Interleaving Merge)
+   ```
+   Choose any option (e.g. `1` or `2`), and watch the conflict resolved cleanly!
+
+---
+
+### Method 2: Live Multi-Tab Web Studio
+
+Open two browser tabs or windows at [`http://127.0.0.1:8000`](http://127.0.0.1:8000):
+
+1. **Tab 1:** Select active device identity as `💻 Laptop-MacBook`.
+2. **Tab 2:** Select active device identity as `📱 Phone-iPhone15`.
+3. In **Tab 1**, click `[⚡ GO OFFLINE]` (Airplane Mode). Type edits into the note and click `Save Offline Draft`.
+4. In **Tab 2**, edit the document while online and click `Save & Sync Revision`.
+5. In **Tab 1**, click `[🟢 ONLINE]` and click `Sync Staged Offline Revision`.
+6. Watch the real-time **Diff3 Auto-Merge** or **Interactive Conflict Resolution Banner** appear live in the browser!
+
+---
+
+### Method 3: Automated Real-Time Terminal Simulator (Cinematic Pacing)
+If you want an automated, cinematic walkthrough of all 8 core rubric tasks with live typewriter output and progress timers:
 
 ```bash
 # Auto Real-Time Mode (~1.0s pacing between device actions)
 python scripts/demo_realtime.py
 
-# Fast Execution Mode (~0.2s pacing)
+# Fast Verification Mode (~0.2s pacing)
 python scripts/demo_realtime.py --fast
 
-# Interactive Step-by-Step Mode (Press [Enter] to trigger each device action)
+# Interactive Step-by-Step Mode (Press [Enter] to advance each device action)
 python scripts/demo_realtime.py --step
 ```
 
-### Option 2: Live Web Studio & Conflict Simulator
-Start the FastAPI server. The compiled interactive React Studio is served directly from the root path:
+---
 
-```bash
-uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
-```
-- **Web Studio & Conflict Simulator:** Open [`http://127.0.0.1:8000`](http://127.0.0.1:8000)
-- **Interactive Swagger UI:** Open [`http://127.0.0.1:8000/docs`](http://127.0.0.1:8000/docs)
-- **ReDoc Documentation:** Open [`http://127.0.0.1:8000/redoc`](http://127.0.0.1:8000/redoc)
-
-### Option 3: Live WebSocket Fleet Feed
-Connect any WebSocket client (Postman, browser console, or wscat) to listen to sub-millisecond sync events as they happen:
-```
-ws://127.0.0.1:8000/ws/sync
-```
-
-### Option 4: Server-Sent Events (SSE) Live Stream
-Stream live synchronization events directly in your terminal using `curl`:
-```bash
-curl -N http://127.0.0.1:8000/sync/realtime/stream
-```
-
-### Option 5: Comprehensive Automated Evaluator Script
-```bash
-python scripts/demo_synclab.py
-```
+### Method 4: Live WebSocket & Server-Sent Events (SSE) Channels
+- **WebSocket:** Connect to `ws://127.0.0.1:8000/ws/sync` (receives sub-millisecond JSON broadcast frames).
+- **SSE Stream:** In your terminal:
+  ```bash
+  curl -N http://127.0.0.1:8000/sync/realtime/stream
+  ```
 
 ---
 
@@ -102,7 +163,7 @@ backend-offline-sync/
 │   │   ├── __init__.py
 │   │   └── service.py               # Semantic conflict detector & risk predictor
 │   ├── routers/
-│   │   ├── devices.py               # Device registry & catch-up delta feeds
+│   │   ├── devices.py               # Device registry, list & catch-up delta feeds
 │   │   ├── documents.py             # Document CRUD, version history, export.md
 │   │   ├── realtime.py              # WebSockets, SSE streams & live simulation
 │   │   └── sync.py                  # Core sync, batch, CRDT, Prolly & ML routes
@@ -117,9 +178,13 @@ backend-offline-sync/
 ├── frontend/                        # React TypeScript Studio with Conflict Simulator
 ├── static/                          # Production-built web assets served by FastAPI
 ├── scripts/
+│   ├── client.py                    # Actual Working Multi-Device Client CLI
 │   ├── demo_realtime.py             # Live Real-Time Multi-Device Terminal Simulator
 │   └── demo_synclab.py              # Evaluator Invariant Verification Script
-├── tests/                           # 39 Pytest unit & integration tests
+├── tests/                           # 42 Pytest unit & integration tests
+│   ├── test_actual_client.py        # Actual client offline/online/merge integration tests
+│   ├── test_realtime.py             # WebSocket, SSE, and live broadcast tests
+│   ├── ...
 ├── CODE_OF_CONDUCT.md
 ├── CONTRIBUTING.md
 ├── LICENSE
@@ -185,6 +250,11 @@ uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 - `GET /sync/realtime/history`: Fetch recent real-time broadcast event timeline.
 - `POST /sync/realtime/simulate`: Run multi-stage real-time simulation scenario.
 
+### Devices & Fleet
+- `POST /devices/register`: Register device identity and update presence.
+- `GET /devices`: List all registered devices and registration timestamps.
+- `GET /devices/{id}/changes`: Catch-up delta feed of mutations since a version.
+
 ### Documents & History
 - `POST /documents`: Create a new document (starts at version 1).
 - `GET /documents/{id}`: Retrieve current state and active version.
@@ -193,7 +263,7 @@ uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 - `GET /documents/{id}/export.md`: Export document as Obsidian-compatible Markdown with YAML frontmatter.
 
 ### Synchronization
-- `POST /sync`: Execute a sync operation (`merge`, `client_wins`, `server_wins`, `manual`).
+- `POST /sync`: Execute a sync operation (`merge`, `diff3`, `client_wins`, `server_wins`, `manual`).
 - `POST /sync/batch`: Atomic multi-operation sync queue flush for reconnecting devices.
 - `POST /sync/batch-summary`: Summary statistics for batch operations.
 
@@ -217,7 +287,7 @@ flowchart TD
     E --> F{"Are there overlapping line conflicts?"}
     F -- No --> G["Merge disjoint edits (Outcome: MERGED)"]
     F -- Yes --> H{"Strategy"}
-    H -- "merge / manual" --> I["Reject write (Outcome: CONFLICT)"]
+    H -- "merge / diff3 / manual" --> I["Reject write (Outcome: CONFLICT)"]
     H -- "client_wins" --> J["Force client state as new version"]
     H -- "server_wins" --> K["Retain server state (Outcome: RESOLVED)"]
 ```
@@ -236,7 +306,7 @@ SyncLab uses scikit-learn and NLP routines for predictive sync management:
 
 ## 7. Automated Testing & Verification
 
-SyncLab maintains a **100% test pass rate** across 39 comprehensive tests:
+SyncLab maintains a **100% test pass rate** across 42 comprehensive tests:
 
 ```bash
 # Run the test suite
@@ -244,7 +314,7 @@ python -m pytest -v
 ```
 
 ```
-============================== 39 passed in 1.26s ==============================
+============================== 42 passed in 1.48s ==============================
 ```
 
 ---

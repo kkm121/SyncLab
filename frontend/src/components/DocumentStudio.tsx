@@ -16,7 +16,10 @@ import {
   RotateCwIcon,
   RefreshCwIcon,
   LaptopIcon,
+  SmartphoneIcon,
   CheckCircleIcon,
+  AlertTriangleIcon,
+  WifiOffIcon,
   TagIcon,
   ClockIcon,
   DownloadIcon,
@@ -39,10 +42,57 @@ export const DocumentStudio: React.FC<Props> = ({ flashNotice, onOpenObsidianExp
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  // Multi-Device Identity & Network State
+  const [deviceId, setDeviceId] = useState<string>(() => {
+    return localStorage.getItem('synclab_device_id') || 'laptop-macbook';
+  });
+  const [isOffline, setIsOffline] = useState<boolean>(false);
+  const [pendingConflict, setPendingConflict] = useState<any | null>(null);
+
   // Active Edit Form
   const [editTitle, setEditTitle] = useState('');
   const [editBody, setEditBody] = useState('');
   const [editTags, setEditTags] = useState('');
+
+  // Persist device ID
+  useEffect(() => {
+    localStorage.setItem('synclab_device_id', deviceId);
+  }, [deviceId]);
+
+  // Live WebSocket Fleet Listener
+  useEffect(() => {
+    if (isOffline) return;
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/ws/sync`;
+    let ws: WebSocket | null = null;
+    try {
+      ws = new WebSocket(wsUrl);
+      ws.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          if (payload.type && payload.type.startsWith('SYNC_')) {
+            const evData = payload.data || {};
+            const sender = evData.device_id;
+            const docId = evData.document_id;
+            if (sender !== deviceId && selectedDoc && docId === selectedDoc.id) {
+              sounds.playTap();
+              flashNotice(`⚡ Live Event: Device '${sender}' pushed revision v${evData.current_version} (${evData.outcome})!`);
+              // Refresh document versions and active doc
+              fetchDocs();
+            }
+          }
+        } catch {
+          /* ignore */
+        }
+      };
+    } catch {
+      /* ignore */
+    }
+
+    return () => {
+      ws?.close();
+    };
+  }, [deviceId, selectedDoc?.id, isOffline]);
 
   const fetchDocs = async () => {
     setLoading(true);
@@ -55,9 +105,14 @@ export const DocumentStudio: React.FC<Props> = ({ flashNotice, onOpenObsidianExp
         const refreshed = data.find((d) => d.id === selectedDoc.id);
         if (refreshed) {
           setSelectedDoc(refreshed);
-          setEditTitle(refreshed.title);
-          setEditBody(refreshed.body);
-          setEditTags(refreshed.tags.join(', '));
+          // If not currently holding local uncommitted offline draft, update form
+          const offlineKey = `synclab_offline_draft_${selectedDoc.id}`;
+          const localDraft = localStorage.getItem(offlineKey);
+          if (!localDraft) {
+            setEditTitle(refreshed.title);
+            setEditBody(refreshed.body);
+            setEditTags(refreshed.tags.join(', '));
+          }
         }
       }
     } catch (err: any) {
@@ -74,9 +129,29 @@ export const DocumentStudio: React.FC<Props> = ({ flashNotice, onOpenObsidianExp
   const handleSelectDoc = async (doc: DocumentOut) => {
     sounds.playTap();
     setSelectedDoc(doc);
-    setEditTitle(doc.title);
-    setEditBody(doc.body);
-    setEditTags(doc.tags.join(', '));
+    setPendingConflict(null);
+
+    // Check if there is an offline staged draft for this document
+    const offlineKey = `synclab_offline_draft_${doc.id}`;
+    const localDraft = localStorage.getItem(offlineKey);
+    if (localDraft) {
+      try {
+        const draftObj = JSON.parse(localDraft);
+        setEditTitle(draftObj.title || doc.title);
+        setEditBody(draftObj.body || doc.body);
+        setEditTags(draftObj.tags || doc.tags.join(', '));
+        flashNotice(`Loaded offline staged mutation (Base v${draftObj.base_version}).`);
+      } catch {
+        setEditTitle(doc.title);
+        setEditBody(doc.body);
+        setEditTags(doc.tags.join(', '));
+      }
+    } else {
+      setEditTitle(doc.title);
+      setEditBody(doc.body);
+      setEditTags(doc.tags.join(', '));
+    }
+
     setIsFlipped(false);
     try {
       const v = await getDocumentVersions(doc.id);
@@ -88,16 +163,20 @@ export const DocumentStudio: React.FC<Props> = ({ flashNotice, onOpenObsidianExp
 
   const handleCreateNew = async () => {
     sounds.playTap();
+    if (isOffline) {
+      flashNotice('Cannot create new server document while in OFFLINE mode. Reconnect first.');
+      return;
+    }
     try {
       const doc = await createDocument({
         title: 'Untitled Collaborative Draft',
         body: '# SyncLab Document\n\nThis note is tracked with versioned writes and 3-way merge.\n\n- Line A: Local-first architecture\n- Line B: Zero silent overwrite guarantee\n- Line C: Obsidian markdown compatible',
         collection: 'notes',
         tags: ['draft', 'offline-first'],
-        device_id: 'client-desktop-alpha',
+        device_id: deviceId,
       });
       sounds.playSuccess();
-      flashNotice('New document created.');
+      flashNotice(`New document created by ${deviceId}.`);
       await fetchDocs();
       handleSelectDoc(doc);
     } catch (err: any) {
@@ -110,24 +189,71 @@ export const DocumentStudio: React.FC<Props> = ({ flashNotice, onOpenObsidianExp
     if (!selectedDoc) return;
     setSaving(true);
     sounds.playTap();
-    try {
-      const parsedTags = editTags.split(',').map((t) => t.trim()).filter(Boolean);
-      const res = await executeSync({
-        device_id: 'client-desktop-alpha',
+
+    const offlineKey = `synclab_offline_draft_${selectedDoc.id}`;
+
+    // If device is currently OFFLINE: Save locally into outbox storage!
+    if (isOffline) {
+      const draftObj = {
         document_id: selectedDoc.id,
         base_version: selectedDoc.version,
+        title: editTitle.trim(),
+        body: editBody,
+        tags: editTags,
+        timestamp: Date.now(),
+      };
+      localStorage.setItem(offlineKey, JSON.stringify(draftObj));
+      sounds.playSuccess();
+      flashNotice(`⚡ [SAVED OFFLINE] Mutation staged locally for ${deviceId} (Base v${selectedDoc.version}). Reconnect to sync.`);
+      setSaving(false);
+      return;
+    }
+
+    // Device is ONLINE: Execute sync operation!
+    try {
+      const parsedTags = editTags.split(',').map((t) => t.trim()).filter(Boolean);
+      const localDraft = localStorage.getItem(offlineKey);
+      let baseVersion = selectedDoc.version;
+      if (localDraft) {
+        try {
+          baseVersion = JSON.parse(localDraft).base_version || selectedDoc.version;
+        } catch {
+          /* ignore */
+        }
+      }
+
+      const res = await executeSync({
+        device_id: deviceId,
+        document_id: selectedDoc.id,
+        base_version: baseVersion,
         title: editTitle.trim(),
         body: editBody,
         tags: parsedTags,
         strategy: 'diff3',
       });
 
-      if (res.outcome === 'accepted' || res.outcome === 'merged') {
+      const outcome = res.outcome;
+      const targetVer = res.current_version || (res as any).target_version || selectedDoc.version + 1;
+
+      if (outcome === 'accepted' || outcome === 'merged') {
+        localStorage.removeItem(offlineKey);
+        setPendingConflict(null);
         sounds.playSuccess();
-        flashNotice(`Document synchronized successfully (Version ${res.target_version} - ${res.outcome}).`);
-      } else if (res.outcome === 'conflict') {
+        flashNotice(`✓ Document synchronized successfully (Version v${targetVer} - ${outcome.toUpperCase()}).`);
+        if (res.document) {
+          setSelectedDoc(res.document);
+          setEditBody(res.document.body);
+          setEditTitle(res.document.title);
+        }
+      } else if (outcome === 'conflict') {
         sounds.playConflict();
-        flashNotice(`Concurrent write detected! Conflict recorded explicitly: ${res.resolution}`);
+        setPendingConflict(res);
+        flashNotice(`⚠ Server rejected stale write! Overlap conflict detected: ${res.resolution}`);
+      } else if (outcome === 'resolved') {
+        localStorage.removeItem(offlineKey);
+        setPendingConflict(null);
+        sounds.playSuccess();
+        flashNotice(`✓ Conflict resolved: ${res.resolution}`);
       }
 
       await fetchDocs();
@@ -143,11 +269,60 @@ export const DocumentStudio: React.FC<Props> = ({ flashNotice, onOpenObsidianExp
     }
   };
 
+  const handleResolveConflict = async (strategy: 'server_wins' | 'client_wins' | 'diff3_markers') => {
+    if (!selectedDoc) return;
+    setSaving(true);
+    sounds.playTap();
+
+    try {
+      if (strategy === 'diff3_markers') {
+        // Load conflict markers into body for manual editing
+        const serverDoc = await getDocument(selectedDoc.id);
+        const markers = (
+          `<<<<<<< LOCAL (${deviceId})\n` +
+          `${editBody}\n` +
+          `=======\n` +
+          `${serverDoc.body}\n` +
+          `>>>>>>> SERVER (v${serverDoc.version})`
+        );
+        setEditBody(markers);
+        setPendingConflict(null);
+        flashNotice('Diff3 conflict markers placed in editor. Review and click Save & Sync.');
+        setSaving(false);
+        return;
+      }
+
+      const parsedTags = editTags.split(',').map((t) => t.trim()).filter(Boolean);
+      const res = await executeSync({
+        device_id: deviceId,
+        document_id: selectedDoc.id,
+        base_version: selectedDoc.version,
+        title: editTitle.trim(),
+        body: editBody,
+        tags: parsedTags,
+        strategy: strategy as any,
+      });
+
+      localStorage.removeItem(`synclab_offline_draft_${selectedDoc.id}`);
+      setPendingConflict(null);
+      sounds.playSuccess();
+      flashNotice(`Conflict resolved using ${strategy}: ${res.resolution}`);
+
+      await fetchDocs();
+      const v = await getDocumentVersions(selectedDoc.id);
+      setVersions(v);
+    } catch (err: any) {
+      flashNotice(err.message || 'Resolution failed');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleRestore = async (versionNum: number) => {
     if (!selectedDoc) return;
     sounds.playTap();
     try {
-      const restored = await restoreDocumentVersion(selectedDoc.id, versionNum, 'client-desktop-alpha');
+      const restored = await restoreDocumentVersion(selectedDoc.id, versionNum, deviceId);
       sounds.playSuccess();
       flashNotice(`Restored to Version ${versionNum} as new Version ${restored.version}.`);
       await fetchDocs();
@@ -156,6 +331,8 @@ export const DocumentStudio: React.FC<Props> = ({ flashNotice, onOpenObsidianExp
       flashNotice(err.message || 'Restore failed');
     }
   };
+
+  const hasOfflineDraft = selectedDoc ? Boolean(localStorage.getItem(`synclab_offline_draft_${selectedDoc.id}`)) : false;
 
   return (
     <div className="document-studio-container">
@@ -170,12 +347,14 @@ export const DocumentStudio: React.FC<Props> = ({ flashNotice, onOpenObsidianExp
           <strong className="telemetry-val highlight-green">v{selectedDoc?.version || 1}</strong>
         </div>
         <div className="telemetry-box glass-panel">
-          <span className="telemetry-lbl">VERSION HISTORY DEPTH</span>
-          <strong className="telemetry-val highlight-indigo">{versions.length} Revisions</strong>
+          <span className="telemetry-lbl">ACTIVE DEVICE IDENTITY</span>
+          <strong className="telemetry-val highlight-cyan">{deviceId}</strong>
         </div>
         <div className="telemetry-box glass-panel">
-          <span className="telemetry-lbl">SYNC ENGINE PROTOCOL</span>
-          <strong className="telemetry-val highlight-amber">3-WAY DIFF3</strong>
+          <span className="telemetry-lbl">NETWORK STATUS</span>
+          <strong className={`telemetry-val ${isOffline ? 'highlight-amber' : 'highlight-green'}`}>
+            {isOffline ? 'OFFLINE ⚡' : 'ONLINE 🟢'}
+          </strong>
         </div>
       </section>
 
@@ -195,7 +374,7 @@ export const DocumentStudio: React.FC<Props> = ({ flashNotice, onOpenObsidianExp
               />
             </div>
 
-            <button className="btn-primary btn-new-doc" onClick={handleCreateNew}>
+            <button className="btn-primary btn-new-doc" onClick={handleCreateNew} disabled={isOffline}>
               <PlusIcon size={14} />
               <span>New Doc</span>
             </button>
@@ -215,38 +394,50 @@ export const DocumentStudio: React.FC<Props> = ({ flashNotice, onOpenObsidianExp
                 <p className="empty-state-desc" style={{ fontSize: '12px' }}>
                   Create your first offline-synced note to begin.
                 </p>
-                <button className="btn-primary" onClick={handleCreateNew}>
+                <button className="btn-primary" onClick={handleCreateNew} disabled={isOffline}>
                   <PlusIcon size={14} />
                   <span>Create Note</span>
                 </button>
               </div>
             ) : (
-              documents.map((d) => (
-                <div
-                  key={d.id}
-                  className={`doc-list-item ${selectedDoc?.id === d.id ? 'active' : ''}`}
-                  onClick={() => handleSelectDoc(d)}
-                >
-                  <div className="doc-item-top">
-                    <span className="doc-item-title">{d.title || 'Untitled Document'}</span>
-                    <span className="doc-version-badge">v{d.version}</span>
+              documents.map((doc) => {
+                const isSelected = selectedDoc?.id === doc.id;
+                const isDraftStaged = Boolean(localStorage.getItem(`synclab_offline_draft_${doc.id}`));
+                return (
+                  <div
+                    key={doc.id}
+                    className={`case-item-row ${isSelected ? 'is-selected' : ''}`}
+                    onClick={() => handleSelectDoc(doc)}
+                  >
+                    <div className="case-row-main">
+                      <div className="case-code-line">
+                        <FileTextIcon size={13} className="case-code-icon" />
+                        <span className="case-code-text">#{doc.id} · {doc.title}</span>
+                      </div>
+                      <div className="case-preview-text">
+                        {doc.body.replace(/^#+\s+/gm, '').slice(0, 75)}...
+                      </div>
+                      <div className="case-meta-tags">
+                        <span className="doc-ver-badge">v{doc.version}</span>
+                        {isDraftStaged && (
+                          <span className="doc-tag-badge" style={{ background: 'rgba(245, 158, 11, 0.2)', color: '#f59e0b', borderColor: '#f59e0b' }}>
+                            OFFLINE DRAFT
+                          </span>
+                        )}
+                        {doc.tags.slice(0, 2).map((t) => (
+                          <span key={t} className="doc-tag-badge">#{t}</span>
+                        ))}
+                      </div>
+                    </div>
                   </div>
-                  <p className="doc-item-preview">{d.body.slice(0, 60)}...</p>
-                  <div className="doc-item-tags">
-                    {d.tags.map((t, idx) => (
-                      <span key={idx} className="doc-tag-pill">
-                        #{t}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>
 
-        {/* 3D Flip Editor Stage */}
-        <div className="perspective-flip-stage doc-editor-stage">
+        {/* 3D Flip Card: Editor & Merge Inspector */}
+        <div className="case-detail-container" style={{ perspective: '1200px' }}>
           <div className={`flip-card-3d ${isFlipped ? 'is-flipped' : ''}`}>
             
             {/* FRONT FACE: Document Editor */}
@@ -262,7 +453,40 @@ export const DocumentStudio: React.FC<Props> = ({ flashNotice, onOpenObsidianExp
                       </div>
                     </div>
 
-                    <div style={{ display: 'flex', gap: '8px' }}>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                      {/* Device Identity Selector */}
+                      <select
+                        className="mod-search-input"
+                        style={{ padding: '6px 12px', fontSize: '12px', fontWeight: '600' }}
+                        value={deviceId}
+                        onChange={(e) => {
+                          setDeviceId(e.target.value);
+                          sounds.playTap();
+                          flashNotice(`Switched device identity to: ${e.target.value}`);
+                        }}
+                      >
+                        <option value="laptop-macbook">💻 Laptop-MacBook</option>
+                        <option value="phone-iphone15">📱 Phone-iPhone15</option>
+                        <option value="tablet-ipad">📟 Tablet-iPad</option>
+                        <option value="desktop-workstation">🖥️ Desktop-Workstation</option>
+                      </select>
+
+                      {/* Network Toggle Button */}
+                      <button
+                        type="button"
+                        className={isOffline ? 'btn-primary' : 'btn-secondary'}
+                        style={isOffline ? { background: '#f59e0b', borderColor: '#d97706', color: '#000' } : {}}
+                        onClick={() => {
+                          sounds.playTap();
+                          setIsOffline(!isOffline);
+                          flashNotice(!isOffline ? 'Switched to OFFLINE mode (Airplane mode).' : 'Switched to ONLINE mode.');
+                        }}
+                        title="Toggle Network connectivity to simulate offline editing"
+                      >
+                        {isOffline ? <WifiOffIcon size={14} /> : <CheckCircleIcon size={14} />}
+                        <span>{isOffline ? 'OFFLINE ⚡' : 'ONLINE 🟢'}</span>
+                      </button>
+
                       <button
                         type="button"
                         className="btn-secondary"
@@ -287,6 +511,40 @@ export const DocumentStudio: React.FC<Props> = ({ flashNotice, onOpenObsidianExp
                       </button>
                     </div>
                   </div>
+
+                  {/* Conflict Notification Banner */}
+                  {pendingConflict && (
+                    <div className="glass-panel" style={{ margin: '16px 0', padding: '16px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#ef4444', fontWeight: '700' }}>
+                        <AlertTriangleIcon size={18} />
+                        <span>CONCURRENT WRITE CONFLICT DETECTED (Server v{pendingConflict.current_version})</span>
+                      </div>
+                      <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: '8px 0 12px 0' }}>
+                        {pendingConflict.resolution || 'Server state has diverged from your base version. Silent overwrite prevented.'}
+                      </p>
+                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                        <button type="button" className="btn-secondary" onClick={() => handleResolveConflict('server_wins')}>
+                          Accept Server v{pendingConflict.current_version}
+                        </button>
+                        <button type="button" className="btn-secondary" onClick={() => handleResolveConflict('client_wins')}>
+                          Force My Changes (Client Wins)
+                        </button>
+                        <button type="button" className="btn-primary" onClick={() => handleResolveConflict('diff3_markers')}>
+                          Insert 3-Way Conflict Markers
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Offline Staged Draft Banner */}
+                  {hasOfflineDraft && !isOffline && (
+                    <div className="glass-panel" style={{ margin: '12px 0', padding: '12px', background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.3)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#f59e0b', fontSize: '13px' }}>
+                        <ClockIcon size={16} />
+                        <span>You have offline staged mutations for this note. Click below to synchronize with server!</span>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Title & Tags */}
                   <div className="doc-fields-grid">
@@ -344,7 +602,15 @@ export const DocumentStudio: React.FC<Props> = ({ flashNotice, onOpenObsidianExp
 
                     <button type="submit" className="submit-report-btn" disabled={saving}>
                       <RefreshCwIcon size={15} className={saving ? 'spin-slow' : ''} />
-                      <span>{saving ? 'Synchronizing Deliberately...' : 'Save & Sync Revision →'}</span>
+                      <span>
+                        {saving
+                          ? 'Synchronizing...'
+                          : isOffline
+                          ? 'Save Offline Draft (Local Cache)'
+                          : hasOfflineDraft
+                          ? 'Sync Staged Offline Revision →'
+                          : 'Save & Sync Revision →'}
+                      </span>
                     </button>
                   </div>
 
@@ -366,6 +632,7 @@ export const DocumentStudio: React.FC<Props> = ({ flashNotice, onOpenObsidianExp
                               className="v-restore-btn"
                               onClick={() => handleRestore(v.version)}
                               title={`Restore content from revision v${v.version}`}
+                              disabled={isOffline}
                             >
                               Restore
                             </button>

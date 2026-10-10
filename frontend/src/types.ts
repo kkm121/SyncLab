@@ -1,4 +1,4 @@
-export type Outcome = 'accepted' | 'merged' | 'conflict' | 'rejected';
+export type Outcome = 'accepted' | 'merged' | 'conflict' | 'rejected' | 'resolved' | 'idempotent_replay';
 
 export type MergeStrategy = 'diff3' | 'server_wins' | 'client_wins' | 'manual';
 
@@ -49,10 +49,12 @@ export interface SyncOp {
 
 export interface SyncResult {
   outcome: Outcome;
-  strategy: string;
+  strategy?: string;
   base_version: number;
-  target_version: number;
-  resolution: string;
+  current_version: number;
+  target_version?: number;
+  merged_fields?: string[];
+  resolution?: string;
   document?: DocumentOut | null;
-  conflicts?: Record<string, any> | null;
+  conflicts?: any[] | null;
 }
