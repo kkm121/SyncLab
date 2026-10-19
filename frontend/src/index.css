@@ -59,6 +59,20 @@
   color-scheme: light;
 }
 
+:root[data-performance='lite'] {
+  --card-blur: none !important;
+  --card-shadow: 0 4px 14px rgba(0, 0, 0, 0.4) !important;
+  --bg-card: rgba(14, 24, 24, 0.96) !important;
+  --bg-card-elevated: rgba(20, 32, 32, 0.98) !important;
+}
+
+:root[data-performance='lite'][data-theme='light'] {
+  --card-blur: none !important;
+  --card-shadow: 0 4px 14px rgba(0, 0, 0, 0.06) !important;
+  --bg-card: rgba(255, 255, 255, 0.98) !important;
+  --bg-card-elevated: #ffffff !important;
+}
+
 * {
   box-sizing: border-box;
   margin: 0;
@@ -92,9 +106,22 @@ body {
   height: 100vh;
   z-index: 0;
   pointer-events: none;
-  opacity: 0.92;
-  filter: blur(55px);
+  opacity: 0.85;
+  filter: blur(40px);
   transform: translateZ(0);
+}
+
+.liquid-aurora-fallback {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 0;
+  pointer-events: none;
+  background: 
+    radial-gradient(circle at 18% 25%, rgba(5, 150, 105, 0.16) 0%, transparent 55%),
+    radial-gradient(circle at 82% 30%, rgba(2, 132, 199, 0.14) 0%, transparent 50%),
+    radial-gradient(circle at 50% 80%, rgba(79, 70, 229, 0.12) 0%, transparent 60%);
 }
 
 .liquid-noise-overlay {
@@ -104,7 +131,7 @@ body {
   z-index: 0;
   background-image: radial-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px);
   background-size: 28px 28px;
-  opacity: 0.6;
+  opacity: 0.5;
 }
 
 .cursor-glow.synclab-cursor-glow {
@@ -376,7 +403,7 @@ body {
   border-top: 1px solid var(--border-specular);
   border-radius: 24px;
   box-shadow: var(--card-shadow);
-  transition: all 0.3s var(--ease-spring-snappy);
+  transition: opacity 0.2s ease, transform 0.2s ease, border-color 0.2s ease;
 }
 
 .synclab-brand-icon {
@@ -1453,4 +1480,231 @@ body {
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 12px;
+}
+
+/* ==========================================================================
+   Adaptive Mobile Performance System (Xiaomi 12 Pro & Low-End Phones)
+   ========================================================================== */
+
+/* Performance Mode Lite Overrides */
+:root[data-performance='lite'] .glass-panel,
+:root[data-performance='lite'] .whistle-header,
+:root[data-performance='lite'] .toast-notification,
+:root[data-performance='lite'] .case-pass-modal {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+:root[data-performance='lite'] .liquid-aurora-canvas {
+  display: none !important;
+}
+
+:root[data-performance='lite'] .synclab-cursor-glow {
+  display: none !important;
+}
+
+:root[data-performance='lite'] .liquid-aurora-fallback {
+  display: block;
+}
+
+.perf-toggle-btn.active-lite {
+  background: rgba(245, 158, 11, 0.16) !important;
+  border-color: rgba(245, 158, 11, 0.5) !important;
+}
+
+/* Mobile View Switcher Bar */
+.mobile-view-bar {
+  display: none;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.mobile-view-pill {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.mobile-view-pill.active {
+  background: var(--accent-emerald);
+  color: #ffffff;
+  border-color: var(--accent-emerald);
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+}
+
+.mobile-only-btn {
+  display: none;
+}
+
+/* Mobile Viewport Optimizations (<= 860px) */
+@media (max-width: 860px) {
+  :root {
+    --card-blur: none !important;
+    --card-shadow: 0 4px 14px rgba(0, 0, 0, 0.45) !important;
+    --bg-card: rgba(14, 22, 22, 0.96) !important;
+    --bg-card-elevated: rgba(20, 32, 32, 0.98) !important;
+  }
+
+  :root[data-theme='light'] {
+    --bg-card: rgba(255, 255, 255, 0.98) !important;
+    --bg-card-elevated: #ffffff !important;
+  }
+
+  .glass-panel,
+  .whistle-header,
+  .toast-notification,
+  .case-pass-modal {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+
+  .liquid-aurora-canvas {
+    display: none !important;
+  }
+
+  .synclab-cursor-glow {
+    display: none !important;
+  }
+
+  .mobile-view-bar {
+    display: flex;
+  }
+
+  .mobile-only-btn {
+    display: inline-flex;
+  }
+
+  .hide-on-mobile {
+    display: none !important;
+  }
+
+  .whistle-header {
+    padding: 12px 14px;
+    flex-direction: column;
+    gap: 12px;
+    align-items: stretch;
+  }
+
+  .header-left {
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .synclab-status-badge {
+    display: none;
+  }
+
+  .header-nav-segmented {
+    width: 100%;
+    justify-content: space-between;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .nav-tab-btn {
+    flex: 1;
+    justify-content: center;
+    padding: 8px 10px;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  .header-actions {
+    position: absolute;
+    top: 12px;
+    right: 14px;
+  }
+
+  .studio-main-content {
+    padding: 14px 10px 60px;
+  }
+
+  .dropbox-main-card {
+    padding: 18px 14px;
+    border-radius: 18px;
+  }
+
+  .mod-telemetry-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  .telemetry-box {
+    padding: 12px 14px;
+    border-radius: 16px;
+  }
+
+  .telemetry-val {
+    font-size: 20px;
+  }
+
+  .cases-split-layout {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .card-top-action-bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .perspective-flip-stage,
+  .case-detail-container {
+    perspective: none !important;
+  }
+
+  .flip-card-3d {
+    transform-style: flat !important;
+    transition: none !important;
+  }
+
+  .flip-card-3d.is-flipped .flip-card-front {
+    display: none;
+  }
+
+  .flip-card-3d.is-flipped .flip-card-back {
+    position: relative;
+    transform: none;
+  }
+
+  .incident-textarea,
+  .sim-textarea {
+    font-size: 16px !important; /* Prevents auto-zoom in mobile browsers */
+  }
+
+  .mod-search-input {
+    font-size: 16px !important;
+  }
+
+  .simulator-devices-grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .diff-matrix-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .toast-notification {
+    left: 14px;
+    right: 14px;
+    bottom: 20px;
+    border-radius: 16px;
+    justify-content: center;
+    font-size: 12px;
+  }
 }

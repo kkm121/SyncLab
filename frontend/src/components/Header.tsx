@@ -9,6 +9,8 @@ import {
   MoonIcon,
   VolumeIcon,
   VolumeMuteIcon,
+  ZapIcon,
+  SparklesIcon,
 } from './Icons';
 
 interface Props {
@@ -18,6 +20,8 @@ interface Props {
   setAudioEnabled: (val: boolean) => void;
   theme: 'dark' | 'light';
   setTheme: (t: 'dark' | 'light') => void;
+  performanceMode: 'ultra' | 'balanced' | 'lite';
+  setPerformanceMode: (m: 'ultra' | 'balanced' | 'lite') => void;
 }
 
 export const Header: React.FC<Props> = ({
@@ -27,11 +31,20 @@ export const Header: React.FC<Props> = ({
   setAudioEnabled,
   theme,
   setTheme,
+  performanceMode,
+  setPerformanceMode,
 }) => {
   const toggleTheme = () => {
     const next = theme === 'dark' ? 'light' : 'dark';
     setTheme(next);
     sounds.playTap();
+  };
+
+  const togglePerformance = () => {
+    sounds.playTap();
+    // Toggle between Lite (high performance 120 FPS mobile) and Ultra
+    const nextMode = performanceMode === 'lite' ? 'ultra' : 'lite';
+    setPerformanceMode(nextMode);
   };
 
   return (
@@ -95,6 +108,16 @@ export const Header: React.FC<Props> = ({
       </div>
 
       <div className="header-actions">
+        {/* Performance Mode Switcher: Essential for Xiaomi 12 Pro & Mid/Low-end phones */}
+        <button
+          className={`icon-action-btn perf-toggle-btn ${performanceMode === 'lite' ? 'active-lite' : ''}`}
+          onClick={togglePerformance}
+          title={`Active Mode: ${performanceMode === 'lite' ? '⚡ 120 FPS Lite (Mobile/Low-End Optimized)' : '🎨 Ultra Glass (Desktop)'}. Click to switch.`}
+          aria-label="Toggle Performance Mode"
+        >
+          {performanceMode === 'lite' ? <ZapIcon size={18} className="highlight-amber" /> : <SparklesIcon size={18} />}
+        </button>
+
         <button
           className="icon-action-btn theme-toggle-btn"
           onClick={toggleTheme}

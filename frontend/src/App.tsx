@@ -14,8 +14,35 @@ export const App: React.FC = () => {
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     return (localStorage.getItem('synclab_theme') as 'dark' | 'light') || 'dark';
   });
+
+  // Performance Mode: 'lite' for 120 FPS high-refresh mobile & low-end devices, 'ultra' for high-end desktop
+  const [performanceMode, setPerformanceMode] = useState<'ultra' | 'balanced' | 'lite'>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('synclab_perf_mode') as 'ultra' | 'balanced' | 'lite' | null;
+      if (saved && ['ultra', 'balanced', 'lite'].includes(saved)) return saved;
+      const isMobile =
+        window.innerWidth <= 860 ||
+        'ontouchstart' in window ||
+        (navigator.maxTouchPoints && navigator.maxTouchPoints > 0);
+      const isLowPower =
+        (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4) ||
+        ((navigator as any).deviceMemory && (navigator as any).deviceMemory <= 4);
+      if (isMobile || isLowPower) return 'lite';
+    }
+    return 'balanced';
+  });
+
   const [activeTab, setActiveTab] = useState<'studio' | 'simulator' | 'devices'>('studio');
-  const [audioEnabled, setAudioEnabled] = useState(true);
+  const [audioEnabled, setAudioEnabled] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('gdg-sound-enabled');
+      if (saved !== null) return saved === 'true';
+      // Mute audio by default on mobile phones to eliminate Web Audio latency
+      const isMobile = window.innerWidth <= 860 || 'ontouchstart' in window;
+      return !isMobile;
+    }
+    return true;
+  });
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [obsidianDocId, setObsidianDocId] = useState<number | null>(null);
 
@@ -25,9 +52,15 @@ export const App: React.FC = () => {
     localStorage.setItem('synclab_theme', theme);
   }, [theme]);
 
+  // Synchronize performance mode with document element
+  useEffect(() => {
+    document.documentElement.dataset.performance = performanceMode;
+    localStorage.setItem('synclab_perf_mode', performanceMode);
+  }, [performanceMode]);
+
   const flashNotice = (msg: string) => {
     setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 3500);
+    setTimeout(() => setToastMessage(null), 3000);
   };
 
   return (
@@ -38,7 +71,7 @@ export const App: React.FC = () => {
       </AnimatePresence>
 
       {/* Dynamic Colorful Liquid Mesh & Ambient Glow */}
-      <LiquidBackdrop />
+      <LiquidBackdrop performanceMode={performanceMode} />
       <CursorGlow />
 
       <Header
@@ -48,6 +81,8 @@ export const App: React.FC = () => {
         setAudioEnabled={setAudioEnabled}
         theme={theme}
         setTheme={setTheme}
+        performanceMode={performanceMode}
+        setPerformanceMode={setPerformanceMode}
       />
 
       <main className="studio-main-content">
@@ -55,10 +90,10 @@ export const App: React.FC = () => {
           {activeTab === 'studio' && (
             <motion.div
               key="studio"
-              initial={{ opacity: 0, y: 16 }}
+              initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -16 }}
-              transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+              exit={{ opacity: 0, y: -12 }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
             >
               <DocumentStudio
                 flashNotice={flashNotice}
@@ -70,10 +105,10 @@ export const App: React.FC = () => {
           {activeTab === 'simulator' && (
             <motion.div
               key="simulator"
-              initial={{ opacity: 0, y: 16 }}
+              initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -16 }}
-              transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+              exit={{ opacity: 0, y: -12 }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
             >
               <ConflictSimulator flashNotice={flashNotice} />
             </motion.div>
@@ -82,10 +117,10 @@ export const App: React.FC = () => {
           {activeTab === 'devices' && (
             <motion.div
               key="devices"
-              initial={{ opacity: 0, y: 16 }}
+              initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -16 }}
-              transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+              exit={{ opacity: 0, y: -12 }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
             >
               <DeviceFleet flashNotice={flashNotice} />
             </motion.div>
@@ -109,9 +144,10 @@ export const App: React.FC = () => {
         {toastMessage && (
           <motion.div
             className="toast-notification"
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 20 }}
+            exit={{ opacity: 0, y: 16 }}
+            transition={{ duration: 0.2 }}
           >
             <span className="toast-beacon" />
             <span>{toastMessage}</span>

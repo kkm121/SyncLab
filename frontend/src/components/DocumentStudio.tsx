@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   getDocuments,
   createDocument,
@@ -16,16 +16,13 @@ import {
   RotateCwIcon,
   RefreshCwIcon,
   LaptopIcon,
-  SmartphoneIcon,
   CheckCircleIcon,
   AlertTriangleIcon,
   WifiOffIcon,
-  TagIcon,
   ClockIcon,
   DownloadIcon,
   GitMergeIcon,
-  DatabaseIcon,
-  SparklesIcon,
+  ArrowRightIcon,
 } from './Icons';
 
 interface Props {
@@ -41,6 +38,9 @@ export const DocumentStudio: React.FC<Props> = ({ flashNotice, onOpenObsidianExp
   const [isFlipped, setIsFlipped] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  // Mobile Navigation: switch between list view and editor view on phone screens
+  const [mobileView, setMobileView] = useState<'list' | 'editor'>('editor');
 
   // Multi-Device Identity & Network State
   const [deviceId, setDeviceId] = useState<string>(() => {
@@ -59,26 +59,60 @@ export const DocumentStudio: React.FC<Props> = ({ flashNotice, onOpenObsidianExp
     localStorage.setItem('synclab_device_id', deviceId);
   }, [deviceId]);
 
-  // Live WebSocket Fleet Listener
+  // Keep a stable ref to selectedDoc so WebSocket doesn't reconnect on doc change
+  const selectedDocRef = useRef<DocumentOut | null>(selectedDoc);
+  useEffect(() => {
+    selectedDocRef.current = selectedDoc;
+  }, [selectedDoc]);
+
+  // Atomic data refresh for active document and fleet
+  const refreshActiveDoc = useCallback(async (docId: number) => {
+    try {
+      const [docs, vList] = await Promise.all([
+        getDocuments(searchQuery || undefined),
+        getDocumentVersions(docId),
+      ]);
+      setDocuments(docs);
+      setVersions(vList);
+      const refreshed = docs.find((d) => d.id === docId);
+      if (refreshed) {
+        setSelectedDoc(refreshed);
+        const offlineKey = `synclab_offline_draft_${docId}`;
+        const localDraft = localStorage.getItem(offlineKey);
+        if (!localDraft) {
+          setEditTitle(refreshed.title);
+          setEditBody(refreshed.body);
+          setEditTags(refreshed.tags.join(', '));
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [searchQuery]);
+
+  // Persistent WebSocket Fleet Listener (Re-connects ONLY if network or deviceId changes)
   useEffect(() => {
     if (isOffline) return;
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}/ws/sync`;
     let ws: WebSocket | null = null;
+    let isMounted = true;
+
     try {
       ws = new WebSocket(wsUrl);
       ws.onmessage = (event) => {
+        if (!isMounted) return;
         try {
           const payload = JSON.parse(event.data);
           if (payload.type && payload.type.startsWith('SYNC_')) {
             const evData = payload.data || {};
             const sender = evData.device_id;
             const docId = evData.document_id;
-            if (sender !== deviceId && selectedDoc && docId === selectedDoc.id) {
+            const activeDoc = selectedDocRef.current;
+            if (sender !== deviceId && activeDoc && docId === activeDoc.id) {
               sounds.playTap();
               flashNotice(`⚡ Live Event: Device '${sender}' pushed revision v${evData.current_version} (${evData.outcome})!`);
-              // Refresh document versions and active doc
-              fetchDocs();
+              refreshActiveDoc(activeDoc.id);
             }
           }
         } catch {
@@ -90,9 +124,10 @@ export const DocumentStudio: React.FC<Props> = ({ flashNotice, onOpenObsidianExp
     }
 
     return () => {
+      isMounted = false;
       ws?.close();
     };
-  }, [deviceId, selectedDoc?.id, isOffline]);
+  }, [deviceId, isOffline, refreshActiveDoc, flashNotice]);
 
   const fetchDocs = async () => {
     setLoading(true);
@@ -105,7 +140,6 @@ export const DocumentStudio: React.FC<Props> = ({ flashNotice, onOpenObsidianExp
         const refreshed = data.find((d) => d.id === selectedDoc.id);
         if (refreshed) {
           setSelectedDoc(refreshed);
-          // If not currently holding local uncommitted offline draft, update form
           const offlineKey = `synclab_offline_draft_${selectedDoc.id}`;
           const localDraft = localStorage.getItem(offlineKey);
           if (!localDraft) {
@@ -130,6 +164,7 @@ export const DocumentStudio: React.FC<Props> = ({ flashNotice, onOpenObsidianExp
     sounds.playTap();
     setSelectedDoc(doc);
     setPendingConflict(null);
+    setMobileView('editor');
 
     // Check if there is an offline staged draft for this document
     const offlineKey = `synclab_offline_draft_${doc.id}`;
@@ -177,6 +212,7 @@ export const DocumentStudio: React.FC<Props> = ({ flashNotice, onOpenObsidianExp
       });
       sounds.playSuccess();
       flashNotice(`New document created by ${deviceId}.`);
+      setMobileView('editor');
       await fetchDocs();
       handleSelectDoc(doc);
     } catch (err: any) {
@@ -239,7 +275,7 @@ export const DocumentStudio: React.FC<Props> = ({ flashNotice, onOpenObsidianExp
         localStorage.removeItem(offlineKey);
         setPendingConflict(null);
         sounds.playSuccess();
-        flashNotice(`✓ Document synchronized successfully (Version v${targetVer} - ${outcome.toUpperCase()}).`);
+        flashNotice(`✓ Synchronized successfully (Version v${targetVer} - ${outcome.toUpperCase()}).`);
         if (res.document) {
           setSelectedDoc(res.document);
           setEditBody(res.document.body);
@@ -248,7 +284,7 @@ export const DocumentStudio: React.FC<Props> = ({ flashNotice, onOpenObsidianExp
       } else if (outcome === 'conflict') {
         sounds.playConflict();
         setPendingConflict(res);
-        flashNotice(`⚠ Server rejected stale write! Overlap conflict detected: ${res.resolution}`);
+        flashNotice(`⚠ Overlap conflict detected on v${res.current_version}! Zero overwrite guarantee.`);
       } else if (outcome === 'resolved') {
         localStorage.removeItem(offlineKey);
         setPendingConflict(null);
@@ -256,11 +292,13 @@ export const DocumentStudio: React.FC<Props> = ({ flashNotice, onOpenObsidianExp
         flashNotice(`✓ Conflict resolved: ${res.resolution}`);
       }
 
-      await fetchDocs();
-      if (selectedDoc) {
-        const v = await getDocumentVersions(selectedDoc.id);
-        setVersions(v);
-      }
+      // Parallel data sync
+      const [docs, vList] = await Promise.all([
+        getDocuments(searchQuery || undefined),
+        getDocumentVersions(selectedDoc.id),
+      ]);
+      setDocuments(docs);
+      setVersions(vList);
     } catch (err: any) {
       sounds.playConflict();
       flashNotice(err.message || 'Sync failed');
@@ -276,7 +314,6 @@ export const DocumentStudio: React.FC<Props> = ({ flashNotice, onOpenObsidianExp
 
     try {
       if (strategy === 'diff3_markers') {
-        // Load conflict markers into body for manual editing
         const serverDoc = await getDocument(selectedDoc.id);
         const markers = (
           `<<<<<<< LOCAL (${deviceId})\n` +
@@ -308,9 +345,15 @@ export const DocumentStudio: React.FC<Props> = ({ flashNotice, onOpenObsidianExp
       sounds.playSuccess();
       flashNotice(`Conflict resolved using ${strategy}: ${res.resolution}`);
 
-      await fetchDocs();
-      const v = await getDocumentVersions(selectedDoc.id);
-      setVersions(v);
+      const [docs, vList] = await Promise.all([
+        getDocuments(searchQuery || undefined),
+        getDocumentVersions(selectedDoc.id),
+      ]);
+      setDocuments(docs);
+      setVersions(vList);
+      if (res.document) {
+        setSelectedDoc(res.document);
+      }
     } catch (err: any) {
       flashNotice(err.message || 'Resolution failed');
     } finally {
@@ -358,10 +401,31 @@ export const DocumentStudio: React.FC<Props> = ({ flashNotice, onOpenObsidianExp
         </div>
       </section>
 
+      {/* Mobile Screen View Switcher Pill */}
+      <div className="mobile-view-bar">
+        <button
+          type="button"
+          className={`mobile-view-pill ${mobileView === 'list' ? 'active' : ''}`}
+          onClick={() => setMobileView('list')}
+        >
+          <FileTextIcon size={14} />
+          <span>Notes List ({documents.length})</span>
+        </button>
+        <button
+          type="button"
+          className={`mobile-view-pill ${mobileView === 'editor' ? 'active' : ''}`}
+          onClick={() => setMobileView('editor')}
+          disabled={!selectedDoc}
+        >
+          <GitMergeIcon size={14} />
+          <span>Editor {selectedDoc ? `(#${selectedDoc.id} v${selectedDoc.version})` : ''}</span>
+        </button>
+      </div>
+
       {/* Main Split Layout */}
       <div className="cases-split-layout">
-        {/* Document Sidebar */}
-        <div className="cases-list-card glass-panel doc-sidebar-panel">
+        {/* Document Sidebar (Hidden on mobile if user is editing) */}
+        <div className={`cases-list-card glass-panel doc-sidebar-panel ${mobileView === 'editor' ? 'hide-on-mobile' : ''}`}>
           <div className="doc-sidebar-header">
             <div className="search-input-wrap">
               <SearchIcon size={14} className="search-icon-field" />
@@ -436,8 +500,8 @@ export const DocumentStudio: React.FC<Props> = ({ flashNotice, onOpenObsidianExp
           </div>
         </div>
 
-        {/* 3D Flip Card: Editor & Merge Inspector */}
-        <div className="case-detail-container" style={{ perspective: '1200px' }}>
+        {/* 3D Flip Card: Editor & Merge Inspector (Hidden on mobile if user is browsing notes) */}
+        <div className={`case-detail-container ${mobileView === 'list' ? 'hide-on-mobile' : ''}`}>
           <div className={`flip-card-3d ${isFlipped ? 'is-flipped' : ''}`}>
             
             {/* FRONT FACE: Document Editor */}
@@ -454,10 +518,20 @@ export const DocumentStudio: React.FC<Props> = ({ flashNotice, onOpenObsidianExp
                     </div>
 
                     <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                      {/* Mobile back button */}
+                      <button
+                        type="button"
+                        className="btn-secondary mobile-only-btn"
+                        onClick={() => setMobileView('list')}
+                        title="Back to notes list"
+                      >
+                        <span>← Notes</span>
+                      </button>
+
                       {/* Device Identity Selector */}
                       <select
                         className="mod-search-input"
-                        style={{ padding: '6px 12px', fontSize: '12px', fontWeight: '600' }}
+                        style={{ padding: '6px 10px', fontSize: '12px', fontWeight: '600' }}
                         value={deviceId}
                         onChange={(e) => {
                           setDeviceId(e.target.value);
@@ -466,9 +540,9 @@ export const DocumentStudio: React.FC<Props> = ({ flashNotice, onOpenObsidianExp
                         }}
                       >
                         <option value="laptop-macbook">💻 Laptop-MacBook</option>
-                        <option value="phone-iphone15">📱 Phone-iPhone15</option>
+                        <option value="phone-iphone15">📱 Phone-Xiaomi/iPhone</option>
                         <option value="tablet-ipad">📟 Tablet-iPad</option>
-                        <option value="desktop-workstation">🖥️ Desktop-Workstation</option>
+                        <option value="desktop-workstation">🖥️ Workstation</option>
                       </select>
 
                       {/* Network Toggle Button */}
@@ -494,7 +568,7 @@ export const DocumentStudio: React.FC<Props> = ({ flashNotice, onOpenObsidianExp
                         title="Export document with Obsidian YAML frontmatter and backlinks"
                       >
                         <DownloadIcon size={14} />
-                        <span>Obsidian Export</span>
+                        <span>Obsidian</span>
                       </button>
 
                       <button
@@ -504,17 +578,17 @@ export const DocumentStudio: React.FC<Props> = ({ flashNotice, onOpenObsidianExp
                           sounds.playTap();
                           setIsFlipped(true);
                         }}
-                        title="3D Flip to inspect 3-Way diff matrix and merge engine"
+                        title="Inspect 3-Way diff matrix and merge engine"
                       >
                         <RotateCwIcon size={14} />
-                        <span>3D Flip · Merge Inspector</span>
+                        <span>Diff3 Matrix</span>
                       </button>
                     </div>
                   </div>
 
                   {/* Conflict Notification Banner */}
                   {pendingConflict && (
-                    <div className="glass-panel" style={{ margin: '16px 0', padding: '16px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
+                    <div className="glass-panel" style={{ margin: '14px 0', padding: '14px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#ef4444', fontWeight: '700' }}>
                         <AlertTriangleIcon size={18} />
                         <span>CONCURRENT WRITE CONFLICT DETECTED (Server v{pendingConflict.current_version})</span>
@@ -530,7 +604,7 @@ export const DocumentStudio: React.FC<Props> = ({ flashNotice, onOpenObsidianExp
                           Force My Changes (Client Wins)
                         </button>
                         <button type="button" className="btn-primary" onClick={() => handleResolveConflict('diff3_markers')}>
-                          Insert 3-Way Conflict Markers
+                          Insert Conflict Markers
                         </button>
                       </div>
                     </div>
@@ -541,7 +615,7 @@ export const DocumentStudio: React.FC<Props> = ({ flashNotice, onOpenObsidianExp
                     <div className="glass-panel" style={{ margin: '12px 0', padding: '12px', background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.3)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#f59e0b', fontSize: '13px' }}>
                         <ClockIcon size={16} />
-                        <span>You have offline staged mutations for this note. Click below to synchronize with server!</span>
+                        <span>Offline staged mutations detected. Click below to synchronize with server!</span>
                       </div>
                     </div>
                   )}
@@ -561,7 +635,7 @@ export const DocumentStudio: React.FC<Props> = ({ flashNotice, onOpenObsidianExp
                     </div>
 
                     <div className="field-group">
-                      <label className="section-label">OBSIDIAN TAGS (COMMA-SEPARATED)</label>
+                      <label className="section-label">OBSIDIAN TAGS</label>
                       <input
                         type="text"
                         className="mod-search-input"
@@ -578,7 +652,7 @@ export const DocumentStudio: React.FC<Props> = ({ flashNotice, onOpenObsidianExp
                     <label className="section-label">MARKDOWN CONTENT</label>
                     <textarea
                       className="incident-textarea"
-                      rows={13}
+                      rows={12}
                       value={editBody}
                       onChange={(e) => setEditBody(e.target.value)}
                       placeholder="Write your document content here in Markdown format..."
@@ -588,7 +662,7 @@ export const DocumentStudio: React.FC<Props> = ({ flashNotice, onOpenObsidianExp
                       <span>{editBody.length} characters · {editBody.split('\n').length} lines</span>
                       <span className="ml-analyzing-indicator">
                         <CheckCircleIcon size={13} />
-                        <span>Base Version v{selectedDoc.version} locked</span>
+                        <span>Base v{selectedDoc.version} locked</span>
                       </span>
                     </div>
                   </div>
@@ -606,16 +680,16 @@ export const DocumentStudio: React.FC<Props> = ({ flashNotice, onOpenObsidianExp
                         {saving
                           ? 'Synchronizing...'
                           : isOffline
-                          ? 'Save Offline Draft (Local Cache)'
+                          ? 'Save Offline Draft (Local)'
                           : hasOfflineDraft
-                          ? 'Sync Staged Offline Revision →'
+                          ? 'Sync Staged Revision →'
                           : 'Save & Sync Revision →'}
                       </span>
                     </button>
                   </div>
 
                   {/* Version History Timeline */}
-                  <div className="doc-history-drawer" style={{ marginTop: '24px' }}>
+                  <div className="doc-history-drawer" style={{ marginTop: '20px' }}>
                     <span className="section-label">IMMUTABLE REVISION HISTORY ({versions.length})</span>
                     <div className="versions-timeline-horizontal">
                       {versions.map((v) => (
@@ -673,27 +747,30 @@ export const DocumentStudio: React.FC<Props> = ({ flashNotice, onOpenObsidianExp
                     title="Return to document editor"
                   >
                     <RotateCwIcon size={14} />
-                    <span>Return to Document Canvas</span>
+                    <span>Return to Canvas</span>
                   </button>
                 </div>
 
-                <div className="diff-matrix-grid">
-                  <div className="diff-column glass-panel">
-                    <div className="diff-col-header">
-                      <ClockIcon size={14} />
-                      <span>COMMON ANCESTOR (BASE v{selectedDoc?.version || 1})</span>
+                {/* Only render diff matrix when card is actually flipped to optimize render times */}
+                {isFlipped && (
+                  <div className="diff-matrix-grid">
+                    <div className="diff-column glass-panel">
+                      <div className="diff-col-header">
+                        <ClockIcon size={14} />
+                        <span>COMMON ANCESTOR (BASE v{selectedDoc?.version || 1})</span>
+                      </div>
+                      <pre className="diff-pre">{selectedDoc?.body || 'No base document loaded'}</pre>
                     </div>
-                    <pre className="diff-pre">{selectedDoc?.body || 'No base document loaded'}</pre>
-                  </div>
 
-                  <div className="diff-column glass-panel">
-                    <div className="diff-col-header highlight-cyan">
-                      <LaptopIcon size={14} />
-                      <span>ACTIVE CLIENT REVISION (STAGING)</span>
+                    <div className="diff-column glass-panel">
+                      <div className="diff-col-header highlight-cyan">
+                        <LaptopIcon size={14} />
+                        <span>ACTIVE CLIENT REVISION (STAGING)</span>
+                      </div>
+                      <pre className="diff-pre">{editBody || 'No active edits'}</pre>
                     </div>
-                    <pre className="diff-pre">{editBody || 'No active edits'}</pre>
                   </div>
-                </div>
+                )}
 
                 <div className="diff-strategies-card glass-panel" style={{ marginTop: '16px', padding: '16px' }}>
                   <span className="section-label">SYNC RESOLUTION BEHAVIOR</span>
@@ -714,7 +791,7 @@ export const DocumentStudio: React.FC<Props> = ({ flashNotice, onOpenObsidianExp
                 </div>
 
                 <div className="ml-back-footer">
-                  <span className="ml-engine-badge">SyncLab Distributed Protocol · Diff3 Engine · SQLAlchemy + SQLite</span>
+                  <span className="ml-engine-badge">SyncLab Distributed Protocol · Diff3 Engine · SQLite Store</span>
                   <button
                     type="button"
                     className="btn-primary"

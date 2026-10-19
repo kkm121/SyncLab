@@ -4,6 +4,9 @@ import { motion, useMotionValue, useSpring } from 'framer-motion';
 export const CursorGlow: React.FC = () => {
   const [enabled] = useState(() => {
     if (typeof window === 'undefined') return false;
+    const isTouch = 'ontouchstart' in window || (navigator.maxTouchPoints && navigator.maxTouchPoints > 0);
+    const isMobile = window.innerWidth <= 860;
+    if (isTouch || isMobile) return false;
     return Boolean(
       window.matchMedia?.('(pointer: fine)').matches &&
       !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
@@ -18,10 +21,11 @@ export const CursorGlow: React.FC = () => {
   useEffect(() => {
     if (!enabled) return;
     const onMove = (e: PointerEvent) => {
+      if (e.pointerType === 'touch') return;
       x.set(e.clientX);
       y.set(e.clientY);
     };
-    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointermove', onMove, { passive: true });
     return () => window.removeEventListener('pointermove', onMove);
   }, [enabled, x, y]);
 

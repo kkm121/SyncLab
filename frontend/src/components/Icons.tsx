@@ -189,3 +189,9 @@ export const WifiOffIcon: React.FC<IconProps> = ({ className, size = 20 }) => (
     <line x1="12" y1="20" x2="12.01" y2="20" />
   </svg>
 );
+
+export const ZapIcon: React.FC<IconProps> = ({ className, size = 20 }) => (
+  <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+  </svg>
+);

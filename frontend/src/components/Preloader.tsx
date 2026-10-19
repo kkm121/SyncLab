@@ -24,7 +24,21 @@ export const Preloader: React.FC<Props> = ({ onDone }) => {
   }, [onDone]);
 
   useEffect(() => {
-    const TOTAL_MS = 4000;
+    // If on a mobile device or previously seen, bypass immediately
+    const isMobile =
+      typeof window !== 'undefined' &&
+      (window.innerWidth <= 860 ||
+        'ontouchstart' in window ||
+        (navigator.maxTouchPoints && navigator.maxTouchPoints > 0));
+    const seen = typeof window !== 'undefined' && localStorage.getItem('synclab_preloader_seen');
+
+    if (isMobile || seen === 'true') {
+      doneRef.current();
+      return;
+    }
+
+    // High performance snappier duration (900ms total)
+    const TOTAL_MS = 900;
     const start = performance.now();
     let frameId = 0;
     const timers: number[] = [];
@@ -47,6 +61,7 @@ export const Preloader: React.FC<Props> = ({ onDone }) => {
       if (progress < 1) {
         frameId = requestAnimationFrame(tick);
       } else {
+        localStorage.setItem('synclab_preloader_seen', 'true');
         timers.push(
           window.setTimeout(() => {
             setIsExiting(true);
@@ -54,9 +69,9 @@ export const Preloader: React.FC<Props> = ({ onDone }) => {
             timers.push(
               window.setTimeout(() => {
                 doneRef.current();
-              }, 750)
+              }, 400)
             );
-          }, 350)
+          }, 150)
         );
       }
     };
@@ -68,23 +83,29 @@ export const Preloader: React.FC<Props> = ({ onDone }) => {
     };
   }, []);
 
-  const handleSkip = () => {
+  const handleSkip = (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    try {
+      localStorage.setItem('synclab_preloader_seen', 'true');
+    } catch {
+      /* ignore */
+    }
     sounds.playTap();
     setIsExiting(true);
     setTimeout(() => {
       doneRef.current();
-    }, 400);
+    }, 250);
   };
 
   const activeStep = STEPS[stepIndex] || STEPS[0];
 
   return (
-    <>
+    <div onClick={() => handleSkip()} style={{ cursor: 'pointer' }}>
       <motion.div
         className="clean-preloader-backdrop synclab-preloader-backdrop"
         initial={{ y: 0 }}
         animate={isExiting ? { y: '-100%' } : { y: 0 }}
-        transition={{ duration: 1.05, ease: [0.76, 0, 0.24, 1], delay: 0.08 }}
+        transition={{ duration: 0.5, ease: [0.76, 0, 0.24, 1] }}
         aria-hidden="true"
       />
 
@@ -92,7 +113,7 @@ export const Preloader: React.FC<Props> = ({ onDone }) => {
         className="clean-preloader synclab-preloader"
         initial={{ y: 0 }}
         animate={isExiting ? { y: '-100%' } : { y: 0 }}
-        transition={{ duration: 1.0, ease: [0.76, 0, 0.24, 1] }}
+        transition={{ duration: 0.45, ease: [0.76, 0, 0.24, 1] }}
         aria-hidden="true"
       >
         <div className="clean-ambient-glow synclab-ambient-glow" />
@@ -113,7 +134,7 @@ export const Preloader: React.FC<Props> = ({ onDone }) => {
           </div>
           <div className="clean-hud-right">
             <button className="clean-skip-btn" onClick={handleSkip} title="Skip loading sequence">
-              Skip Sequence
+              Skip (Tap Anywhere)
             </button>
           </div>
         </header>
@@ -121,8 +142,8 @@ export const Preloader: React.FC<Props> = ({ onDone }) => {
         {/* Centered Typography */}
         <motion.div
           className="clean-center-box"
-          animate={isExiting ? { opacity: 0, y: -36, scale: 0.96 } : { opacity: 1, y: 0, scale: 1 }}
-          transition={{ duration: 0.4 }}
+          animate={isExiting ? { opacity: 0, y: -24, scale: 0.98 } : { opacity: 1, y: 0, scale: 1 }}
+          transition={{ duration: 0.3 }}
         >
           <div className="clean-category-badge">
             <span>Offline-First Distributed Engine · Version 1.0</span>
@@ -132,10 +153,10 @@ export const Preloader: React.FC<Props> = ({ onDone }) => {
             <motion.h2
               className="clean-kinetic-word"
               key={activeStep.word}
-              initial={{ y: 32, opacity: 0, filter: 'blur(8px)' }}
-              animate={{ y: 0, opacity: 1, filter: 'blur(0px)' }}
-              exit={{ y: -32, opacity: 0, filter: 'blur(8px)' }}
-              transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+              initial={{ y: 20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: -20, opacity: 0 }}
+              transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
             >
               {activeStep.word}
             </motion.h2>
@@ -144,9 +165,9 @@ export const Preloader: React.FC<Props> = ({ onDone }) => {
           <motion.p
             className="clean-kinetic-subtitle"
             key={activeStep.subtitle}
-            initial={{ opacity: 0, y: 10 }}
+            initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.4, delay: 0.1 }}
+            transition={{ duration: 0.25 }}
           >
             {activeStep.subtitle}
           </motion.p>
@@ -175,11 +196,11 @@ export const Preloader: React.FC<Props> = ({ onDone }) => {
           </div>
         </footer>
 
-        {/* Olivier Larose Curved Bezier Wave Exit Arch */}
+        {/* Curved Exit Arch */}
         <svg className="clean-preloader-curve synclab-preloader-curve" viewBox="0 0 1440 120" preserveAspectRatio="none">
           <path d="M0,120 L0,50 Q720,0 1440,50 L1440,120 Z" />
         </svg>
       </motion.div>
-    </>
+    </div>
   );
 };
